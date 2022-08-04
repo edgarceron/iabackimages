@@ -20,7 +20,8 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
         :param link: the url of the link to download
         :return:
     """
-    download_path = 'tmp/' + os.path.basename(link)
+    download_path = '/tmp/' + os.path.basename(link).strip()
+    os.makedirs('/tmp/', exist_ok=True) 
     s3Session = boto3.Session(
         aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
         aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
@@ -34,24 +35,34 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
     logger.info('Starting %s', link)
     try:
         async with aioSession.get(link) as response:
-            async with aiofiles.open(download_path, "w") as buffer:
+            async with aiofiles.open(download_path, "wb") as buffer:
                 while True:
                     chunk = await response.content.read(1024)
-                    if chunk: buffer.write(chunk)
+                    if chunk: await buffer.write(chunk)
                     else: break
         logger.info('Downloaded %s', link)
+        downloaded = True
     except:
+        downloaded = False
         logger.info('Fail to download %s', link)   
+    
+    if not downloaded: return
 
-    logger.info('Resizing  %s', download_path)   
-    image = Image.open(download_path)
-    image = image.resize(size=(200, 200))
-    image = image.convert("L")
-    image.save(download_path)
+    try:
+        logger.info('Resizing  %s', download_path)   
+        with Image.open(download_path.strip()) as image:
+            image = image.resize(size=(200, 200))
+            image = image.convert("L")
+            image.save(download_path)
+    except Exception as e:
+        logger.info('Fail to resize %s', download_path)   
+        logger.info(e)   
+        return
+
 
     logger.info('Uploading  %s', download_path)
     try:
-        async with aiofiles.open('articuno.json', mode='r') as f:
+        async with aiofiles.open(download_path, mode='rb') as f:
             with open(url, 'wb', transport_params={'client': s3Session.client('s3')}) as fout:
                 while True:
                     # await pauses execution until the 1024 (or less) bytes are read from the stream
@@ -60,8 +71,9 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
                     else: break
         logger.info('Uploaded %s', download_path)
             
-    except:
+    except Exception as e:
         logger.info('Fail to upload %s', download_path)   
+        logger.info(e)   
 
     
 
@@ -81,7 +93,7 @@ if __name__ == '__main__':
 
     label = os.getenv('LABEL_FILE')
     bucket = os.getenv('AWS_BUCKET_NAME')
-    file_label = 'tmp/' + label
+    file_label = '/tmp/' + label
     s3.Bucket('iabackimages').download_file(label, file_label)
     
 
