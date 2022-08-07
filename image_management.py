@@ -1,3 +1,4 @@
+from codecs import StreamWriter
 import boto3, os, io, aiofiles
 import asyncio
 import logging
@@ -12,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
-async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link: str):
+async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link: str, writer: StreamWriter):
     """
         Async version of the download_link method we've been using in the other examples.
         :param session: aiohttp ClientSession
@@ -41,12 +42,11 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
                     if chunk: await buffer.write(chunk)
                     else: break
         logger.info('Downloaded %s', link)
-        downloaded = True
     except:
-        downloaded = False
         logger.info('Fail to download %s', link)   
-    
-    if not downloaded: return
+        reply = f'{label},fail,1'
+        writer.write(str.encode(reply))
+        return
 
     try:
         logger.info('Resizing  %s', download_path)   
@@ -57,6 +57,8 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
     except Exception as e:
         logger.info('Fail to resize %s', download_path)   
         logger.info(e)   
+        reply = f'{label},fail,1'
+        writer.write(str.encode(reply))
         return
 
 
@@ -70,20 +72,26 @@ async def async_download_link(aioSession: aiohttp.ClientSession,label: str, link
                     if chunk: fout.write(chunk)
                     else: break
         logger.info('Uploaded %s', download_path)
+        reply = f'{label},success,1'
+        writer.write(str.encode(reply))
+
             
     except Exception as e:
         logger.info('Fail to upload %s', download_path)   
         logger.info(e)   
-
-    
+        reply = f'{label},fail,1'
+        writer.write(str.encode(reply))
 
 
 # Main is now a coroutine
-async def main(label: str, urls: list):
+async def main(label: str, urls: list, loop: asyncio.AbstractEventLoop):
     # We use a session to take advantage of tcp keep-alive
     # Set a 3 second read and connect timeout. Default is 5 minutes
+    socket_url = os.getenv('SOCKET_URL')
+    socket_port = os.getenv('SOCKET_PORT')
+    reader, writer = await asyncio.open_connection(socket_url, socket_port, loop=loop) 
     async with aiohttp.ClientSession(conn_timeout=5, read_timeout=5, trust_env=True) as aioSession:
-        tasks = [(async_download_link(aioSession, label, l)) for l in urls]
+        tasks = [(async_download_link(aioSession, label, l, writer)) for l in urls]
         # gather aggregates all the tasks and schedules them in the event loop
         await asyncio.gather(*tasks)
 
@@ -105,9 +113,14 @@ if __name__ == '__main__':
     ts = time()
     # Create the asyncio event loop
     loop = asyncio.get_event_loop()
+
+    # Connect to the memcached server and send the total number of urls
+    # 4 entrys - label_total, label_success, label_fail, label_finished
+
     try:
-        loop.run_until_complete(main(label, urls))
+        loop.run_until_complete(main(label, urls, loop))
     finally:
         # Shutdown the loop even if there is an exception
         loop.close()
+        # Write label_finished as 1
     logger.info('Took %s seconds to complete', time() - ts)
