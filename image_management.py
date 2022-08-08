@@ -89,7 +89,10 @@ async def main(label: str, urls: list, loop: asyncio.AbstractEventLoop):
     # Set a 3 second read and connect timeout. Default is 5 minutes
     socket_url = os.getenv('SOCKET_URL')
     socket_port = os.getenv('SOCKET_PORT')
-    reader, writer = await asyncio.open_connection(socket_url, socket_port, loop=loop) 
+    reader, writer = await asyncio.open_connection(socket_url, socket_port, loop=loop)
+    reply = f'{label},total,{len(urls)}'
+    writer.write(str.encode(reply))
+
     async with aiohttp.ClientSession(conn_timeout=5, read_timeout=5, trust_env=True) as aioSession:
         tasks = [(async_download_link(aioSession, label, l, writer)) for l in urls]
         # gather aggregates all the tasks and schedules them in the event loop
